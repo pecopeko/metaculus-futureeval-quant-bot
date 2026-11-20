@@ -1,0 +1,387 @@
+{
+  "generated_at": "2026-11-20T02:55:27.172885+00:00",
+  "metaculus_api_probe": {
+    "status": "auth_required",
+    "http_status": 403,
+    "url": "https://www.metaculus.com/api/posts/",
+    "detail": "Permission Error: The API is only available to authenticated users. Please create an account and use your API token to access the API. | Metaculus requires an authenticated bot token for API endpoints. Set METACULUS_TOKEN from https://www.metaculus.com/futureeval/participate/."
+  },
+  "provenance": {
+    "dataset": "forecastingresearch/forecastbench-datasets",
+    "base_url": "https://huggingface.co/datasets/forecastingresearch/forecastbench-datasets/resolve/main/datasets",
+    "snapshots_requested": [
+      "2026-01-04",
+      "2026-01-18",
+      "2026-02-01",
+      "2026-02-15",
+      "2026-03-01",
+      "2026-03-15",
+      "2026-03-29",
+      "2026-04-12",
+      "2026-04-26",
+      "2026-05-10",
+      "2026-05-24",
+      "2026-06-07",
+      "2026-06-21",
+      "2026-07-05",
+      "2026-07-19",
+      "2026-08-02",
+      "2026-08-16",
+      "2026-08-30",
+      "2026-09-13",
+      "2026-09-27",
+      "2026-10-11",
+      "2026-10-25"
+    ],
+    "snapshots_loaded": [
+      "2026-01-04",
+      "2026-01-18",
+      "2026-02-01",
+      "2026-02-15",
+      "2026-03-01",
+      "2026-03-15",
+      "2026-03-29",
+      "2026-04-12",
+      "2026-04-26",
+      "2026-05-10",
+      "2026-05-24",
+      "2026-06-07",
+      "2026-06-21",
+      "2026-07-05",
+      "2026-07-19",
+      "2026-08-02",
+      "2026-08-16",
+      "2026-08-30",
+      "2026-09-13",
+      "2026-09-27",
+      "2026-10-11",
+      "2026-10-25"
+    ],
+    "snapshots_failed": {}
+  },
+  "total_unique_records": 1403,
+  "cohorts": [
+    {
+      "cohort": "Metaculus Resolved Binary Questions (2026)",
+      "train_n": 108,
+      "test_n": 52,
+      "train_yes_rate": 0.3148,
+      "test_yes_rate": 0.2692,
+      "oos_fit": {
+        "shrinkage_w": 0.84,
+        "extremize_d": 0.925,
+        "effective_slope": 0.777,
+        "train_metaculus_baseline_score": 25.992,
+        "train_n": 108
+      },
+      "oos_metrics": [
+        {
+          "strategy": "1. Uniform 50% Baseline",
+          "n_questions": 52,
+          "brier_score": 0.25,
+          "log_loss_nats": 0.69315,
+          "metaculus_baseline_score": 0.0,
+          "ece_10bin": 0.23077,
+          "worst_question_baseline_score": 0.0,
+          "mean_predicted_prob": 0.5,
+          "empirical_yes_rate": 0.2692
+        },
+        {
+          "strategy": "2. Train Base-Rate Prior (31.5%)",
+          "n_questions": 52,
+          "brier_score": 0.19882,
+          "log_loss_nats": 0.58745,
+          "metaculus_baseline_score": 15.249,
+          "ece_10bin": 0.04558,
+          "worst_question_baseline_score": -66.742,
+          "mean_predicted_prob": 0.3148,
+          "empirical_yes_rate": 0.2692
+        },
+        {
+          "strategy": "3. Raw Market/Crowd Anchor [0.001, 0.999]",
+          "n_questions": 52,
+          "brier_score": 0.17797,
+          "log_loss_nats": 0.51844,
+          "metaculus_baseline_score": 25.205,
+          "ece_10bin": 0.15277,
+          "worst_question_baseline_score": -264.386,
+          "mean_predicted_prob": 0.3321,
+          "empirical_yes_rate": 0.2692
+        },
+        {
+          "strategy": "4. Safety-Clipped Anchor [0.01, 0.99]",
+          "n_questions": 52,
+          "brier_score": 0.17797,
+          "log_loss_nats": 0.51861,
+          "metaculus_baseline_score": 25.18,
+          "ece_10bin": 0.1526,
+          "worst_question_baseline_score": -264.386,
+          "mean_predicted_prob": 0.3323,
+          "empirical_yes_rate": 0.2692
+        },
+        {
+          "strategy": "5. OOS Calibrated Shrinkage+Extremizing (w=0.84, d=0.93)",
+          "n_questions": 52,
+          "brier_score": 0.16693,
+          "log_loss_nats": 0.49649,
+          "metaculus_baseline_score": 28.372,
+          "ece_10bin": 0.15036,
+          "worst_question_baseline_score": -215.927,
+          "mean_predicted_prob": 0.3211,
+          "empirical_yes_rate": 0.2692
+        },
+        {
+          "strategy": "6. Structural Base-Rate + Calibrated Anchor Hybrid",
+          "n_questions": 52,
+          "brier_score": 0.17221,
+          "log_loss_nats": 0.50514,
+          "metaculus_baseline_score": 27.123,
+          "ece_10bin": 0.18036,
+          "worst_question_baseline_score": -193.933,
+          "mean_predicted_prob": 0.3481,
+          "empirical_yes_rate": 0.2692
+        }
+      ],
+      "calibrated_vs_raw_metaculus_delta": {
+        "mean_delta": 3.167,
+        "ci95_low": -1.096,
+        "ci95_high": 7.752
+      },
+      "sample_test_questions": [
+        {
+          "source": "metaculus",
+          "id": "43941",
+          "freeze_date": "2026-06-25",
+          "resolution_date": "2026-11-02",
+          "anchor_prob": 0.609,
+          "outcome": 0.0,
+          "question": "Will Karen Bass be reelected Mayor of Los Angeles in 2026?"
+        },
+        {
+          "source": "metaculus",
+          "id": "14025",
+          "freeze_date": "2026-06-25",
+          "resolution_date": "2026-07-29",
+          "anchor_prob": 0.869664,
+          "outcome": 1.0,
+          "question": "Will the Japan Self-Defense Forces have tested a Tomahawk missile by mid-2027?"
+        },
+        {
+          "source": "metaculus",
+          "id": "43637",
+          "freeze_date": "2026-06-25",
+          "resolution_date": "2026-10-19",
+          "anchor_prob": 0.05,
+          "outcome": 0.0,
+          "question": "Will the 2026 Alberta independence referendum pass?"
+        },
+        {
+          "source": "metaculus",
+          "id": "43881",
+          "freeze_date": "2026-06-25",
+          "resolution_date": "2026-08-31",
+          "anchor_prob": 0.1,
+          "outcome": 0.0,
+          "question": "Will Volodymyr Zelenskyy and Vladimir Putin meet in person before September 1, 2026?"
+        },
+        {
+          "source": "metaculus",
+          "id": "43841",
+          "freeze_date": "2026-06-25",
+          "resolution_date": "2026-08-31",
+          "anchor_prob": 0.668,
+          "outcome": 0.0,
+          "question": "Will OpenAI publicly file an initial registration statement (S-1) with the SEC to launch an IPO, before September 1, 202"
+        },
+        {
+          "source": "metaculus",
+          "id": "43985",
+          "freeze_date": "2026-06-25",
+          "resolution_date": "2026-09-01",
+          "anchor_prob": 0.043,
+          "outcome": 0.0,
+          "question": "Before September 1, 2026, will Turkish President Recep Tayyip Erdo\u011fan be legally permitted to run for another term?"
+        },
+        {
+          "source": "metaculus",
+          "id": "43853",
+          "freeze_date": "2026-06-25",
+          "resolution_date": "2026-08-31",
+          "anchor_prob": 0.34391,
+          "outcome": 0.0,
+          "question": "Will former U.S. Representative George Santos be arrested before September 1, 2026?"
+        },
+        {
+          "source": "metaculus",
+          "id": "43984",
+          "freeze_date": "2026-06-25",
+          "resolution_date": "2026-07-19",
+          "anchor_prob": 0.76,
+          "outcome": 1.0,
+          "question": "Will the Liberal Party officially nominate Fl\u00e1vio Bolsonaro as its candidate for president of Brazil before August 15, 2"
+        }
+      ]
+    },
+    {
+      "cohort": "Multi-Platform Prediction Markets (Metaculus + Polymarket + Manifold + Kalshi, 2026)",
+      "train_n": 852,
+      "test_n": 551,
+      "train_yes_rate": 0.3533,
+      "test_yes_rate": 0.4156,
+      "oos_fit": {
+        "shrinkage_w": 1.0,
+        "extremize_d": 1.05,
+        "effective_slope": 1.05,
+        "train_metaculus_baseline_score": 43.146,
+        "train_n": 852
+      },
+      "oos_metrics": [
+        {
+          "strategy": "1. Uniform 50% Baseline",
+          "n_questions": 551,
+          "brier_score": 0.25,
+          "log_loss_nats": 0.69315,
+          "metaculus_baseline_score": 0.0,
+          "ece_10bin": 0.08439,
+          "worst_question_baseline_score": 0.0,
+          "mean_predicted_prob": 0.5,
+          "empirical_yes_rate": 0.4156
+        },
+        {
+          "strategy": "2. Train Base-Rate Prior (35.3%)",
+          "n_questions": 551,
+          "brier_score": 0.24676,
+          "log_loss_nats": 0.68714,
+          "metaculus_baseline_score": 0.867,
+          "ece_10bin": 0.06232,
+          "worst_question_baseline_score": -50.109,
+          "mean_predicted_prob": 0.3533,
+          "empirical_yes_rate": 0.4156
+        },
+        {
+          "strategy": "3. Raw Market/Crowd Anchor [0.001, 0.999]",
+          "n_questions": 551,
+          "brier_score": 0.1359,
+          "log_loss_nats": 0.41742,
+          "metaculus_baseline_score": 39.779,
+          "ece_10bin": 0.02438,
+          "worst_question_baseline_score": -505.889,
+          "mean_predicted_prob": 0.4172,
+          "empirical_yes_rate": 0.4156
+        },
+        {
+          "strategy": "4. Safety-Clipped Anchor [0.01, 0.99]",
+          "n_questions": 551,
+          "brier_score": 0.1359,
+          "log_loss_nats": 0.41744,
+          "metaculus_baseline_score": 39.777,
+          "ece_10bin": 0.02436,
+          "worst_question_baseline_score": -505.889,
+          "mean_predicted_prob": 0.4172,
+          "empirical_yes_rate": 0.4156
+        },
+        {
+          "strategy": "5. OOS Calibrated Shrinkage+Extremizing (w=1.00, d=1.05)",
+          "n_questions": 551,
+          "brier_score": 0.13601,
+          "log_loss_nats": 0.4174,
+          "metaculus_baseline_score": 39.782,
+          "ece_10bin": 0.03082,
+          "worst_question_baseline_score": -531.358,
+          "mean_predicted_prob": 0.4205,
+          "empirical_yes_rate": 0.4156
+        },
+        {
+          "strategy": "6. Structural Base-Rate + Calibrated Anchor Hybrid",
+          "n_questions": 551,
+          "brier_score": 0.13587,
+          "log_loss_nats": 0.41721,
+          "metaculus_baseline_score": 39.809,
+          "ece_10bin": 0.02795,
+          "worst_question_baseline_score": -535.666,
+          "mean_predicted_prob": 0.4164,
+          "empirical_yes_rate": 0.4156
+        }
+      ],
+      "calibrated_vs_raw_metaculus_delta": {
+        "mean_delta": 0.003,
+        "ci95_low": -0.32,
+        "ci95_high": 0.283
+      },
+      "sample_test_questions": [
+        {
+          "source": "manifold",
+          "id": "IR8S8CNh8E",
+          "freeze_date": "2026-06-25",
+          "resolution_date": "2026-07-08",
+          "anchor_prob": 0.905607,
+          "outcome": 1.0,
+          "question": "World Cup Goals H2H: Messi vs. Ronaldo"
+        },
+        {
+          "source": "manifold",
+          "id": "NcuQEz998g",
+          "freeze_date": "2026-06-25",
+          "resolution_date": "2026-09-16",
+          "anchor_prob": 0.583439,
+          "outcome": 1.0,
+          "question": "Will the Federal Reserve hike interest rates in 2026?"
+        },
+        {
+          "source": "manifold",
+          "id": "zuzyPl5AOs",
+          "freeze_date": "2026-06-25",
+          "resolution_date": "2026-08-23",
+          "anchor_prob": 0.895352,
+          "outcome": 1.0,
+          "question": "Harvey AI publicly announces $200M+ ARR by EOY2026?"
+        },
+        {
+          "source": "manifold",
+          "id": "BpoEJNtlQoDBpfjBmK0y",
+          "freeze_date": "2026-06-25",
+          "resolution_date": "2026-11-04",
+          "anchor_prob": 0.499956,
+          "outcome": 0.0,
+          "question": "Will Republicans win the Senate in the 2026 elections?"
+        },
+        {
+          "source": "manifold",
+          "id": "2ESLt0g85E",
+          "freeze_date": "2026-06-25",
+          "resolution_date": "2026-10-26",
+          "anchor_prob": 0.916591,
+          "outcome": 1.0,
+          "question": "Will Anthropic become profitable this year?"
+        },
+        {
+          "source": "manifold",
+          "id": "Nu6SdtpOsy",
+          "freeze_date": "2026-06-25",
+          "resolution_date": "2026-07-23",
+          "anchor_prob": 0.492116,
+          "outcome": 1.0,
+          "question": "Will SpaceX valuation drop by -50% or more from its ATH?"
+        },
+        {
+          "source": "manifold",
+          "id": "8chunvsk19",
+          "freeze_date": "2026-06-25",
+          "resolution_date": "2026-07-07",
+          "anchor_prob": 0.49947,
+          "outcome": 0.0,
+          "question": "Will USMNT reach the quarterfinals of World Cup 2026?"
+        },
+        {
+          "source": "manifold",
+          "id": "EQS2ASSNtn",
+          "freeze_date": "2026-06-25",
+          "resolution_date": "2026-07-18",
+          "anchor_prob": 0.279285,
+          "outcome": 0.0,
+          "question": "Strait of Hormuz traffic returns to normal by July 15? [Polymarket]"
+        }
+      ]
+    }
+  ]
+}

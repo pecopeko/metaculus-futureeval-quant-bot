@@ -1,0 +1,91 @@
+name: Metaculus FutureEval Quant Bot
+
+on:
+  schedule:
+    # Runs every 6 hours (0:17, 6:17, 12:17, 18:17 UTC) on free GitHub Actions runners
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      tournament:
+        description: "Metaculus tournament ID or slug (33121=Fall 2026 FutureEval, minibench, bot-testing-area)"
+        required: false
+        default: "33121"
+      submit:
+        description: "Actually POST forecasts & private reasoning comments (requires METACULUS_TOKEN)"
+        required: false
+        type: boolean
+        default: false
+      max_questions:
+        description: "Maximum open questions to forecast per run"
+        required: false
+        default: "20"
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: metaculus-futureeval-bot-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify-and-forecast:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install lightweight package & test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run unit & payload validation tests
+        run: pytest -v
+
+      - name: Check setup & API connectivity
+        env:
+          METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          FORECAST_MODEL: ${{ vars.FORECAST_MODEL }}
+          METACULUS_TOURNAMENT: ${{ github.event.inputs.tournament || vars.METACULUS_TOURNAMENT || '33121' }}
+          SUBMIT_FORECASTS: ${{ vars.SUBMIT_FORECASTS || 'false' }}
+        run: metaculus-quant-bot check-setup
+
+      - name: Run FutureEval Forecasting Bot (dry-run safe when secrets absent)
+        env:
+          METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          FORECAST_MODEL: ${{ vars.FORECAST_MODEL }}
+          EXTREMIZE_D: ${{ vars.EXTREMIZE_D || '1.08' }}
+          PROB_MIN: ${{ vars.PROB_MIN || '0.01' }}
+          PROB_MAX: ${{ vars.PROB_MAX || '0.99' }}
+          INPUT_TOURNAMENT: ${{ github.event.inputs.tournament || vars.METACULUS_TOURNAMENT || '33121' }}
+          INPUT_SUBMIT: ${{ github.event.inputs.submit || vars.SUBMIT_FORECASTS || 'false' }}
+          INPUT_MAX_QUESTIONS: ${{ github.event.inputs.max_questions || '20' }}
+        run: |
+          if [ -z "${METACULUS_TOKEN}" ]; then
+            echo "METACULUS_TOKEN secret not set — executing zero-write sample dry-run."
+            metaculus-quant-bot forecast --sample --dry-run
+          elif [ "${GITHUB_EVENT_NAME}" = "pull_request" ] || [ "${INPUT_SUBMIT}" != "true" ]; then
+            echo "Running authenticated DRY-RUN on tournament ${INPUT_TOURNAMENT} (no forecasts posted)."
+            metaculus-quant-bot forecast --tournament "${INPUT_TOURNAMENT}" --max-questions "${INPUT_MAX_QUESTIONS}" --dry-run
+          else
+            echo "Submitting LIVE forecasts to tournament ${INPUT_TOURNAMENT}."
+            metaculus-quant-bot forecast --tournament "${INPUT_TOURNAMENT}" --max-questions "${INPUT_MAX_QUESTIONS}" --submit
+          fi

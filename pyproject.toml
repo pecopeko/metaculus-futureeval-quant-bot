@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "metaculus-futureeval-quant-bot"
+version = "1.0.0"
+description = "Autonomous hybrid quantitative + market-anchor + live-evidence AI forecasting bot for the Metaculus Fall 2026 FutureEval Bot Tournament ($50,000 USD pool)."
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.11"
+authors = [
+  {name = "pecopeko", email = "198374676+pecopeko@users.noreply.github.com"}
+]
+keywords = [
+  "metaculus",
+  "forecasting",
+  "ai-agent",
+  "prediction-markets",
+  "polymarket",
+  "quant",
+  "futureeval"
+]
+dependencies = [
+  "httpx>=0.27.0",
+  "numpy>=1.26.0",
+  "pydantic>=2.7.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0.0",
+]
+
+[project.scripts]
+metaculus-quant-bot = "metaculus_quant_bot.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
