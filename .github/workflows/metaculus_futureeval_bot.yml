@@ -2,14 +2,15 @@ name: Metaculus FutureEval Quant Bot
 
 on:
   schedule:
-    # Runs every 6 hours (0:17, 6:17, 12:17, 18:17 UTC) on free GitHub Actions runners
-    - cron: "17 */6 * * *"
+    # FutureEval & MiniBench questions launch at random hours with 3-hour open windows;
+    # polling every 30 minutes catches every 3-hour window on free public GitHub Actions runners.
+    - cron: "7,37 * * * *"
   workflow_dispatch:
     inputs:
       tournament:
-        description: "Metaculus tournament ID or slug (33121=Fall 2026 FutureEval, minibench, bot-testing-area)"
+        description: "Metaculus tournament ID/slug or comma-separated list (default: 33121,minibench)"
         required: false
-        default: "33121"
+        default: "33121,minibench"
       submit:
         description: "Actually POST forecasts & private reasoning comments (requires METACULUS_TOKEN)"
         required: false
@@ -75,17 +76,24 @@ jobs:
           EXTREMIZE_D: ${{ vars.EXTREMIZE_D || '1.08' }}
           PROB_MIN: ${{ vars.PROB_MIN || '0.01' }}
           PROB_MAX: ${{ vars.PROB_MAX || '0.99' }}
-          INPUT_TOURNAMENT: ${{ github.event.inputs.tournament || vars.METACULUS_TOURNAMENT || '33121' }}
+          INPUT_TOURNAMENT: ${{ github.event.inputs.tournament || vars.METACULUS_TOURNAMENT || '33121,minibench' }}
           INPUT_SUBMIT: ${{ github.event.inputs.submit || vars.SUBMIT_FORECASTS || 'false' }}
           INPUT_MAX_QUESTIONS: ${{ github.event.inputs.max_questions || '20' }}
         run: |
           if [ -z "${METACULUS_TOKEN}" ]; then
             echo "METACULUS_TOKEN secret not set — executing zero-write sample dry-run."
             metaculus-quant-bot forecast --sample --dry-run
-          elif [ "${GITHUB_EVENT_NAME}" = "pull_request" ] || [ "${INPUT_SUBMIT}" != "true" ]; then
-            echo "Running authenticated DRY-RUN on tournament ${INPUT_TOURNAMENT} (no forecasts posted)."
-            metaculus-quant-bot forecast --tournament "${INPUT_TOURNAMENT}" --max-questions "${INPUT_MAX_QUESTIONS}" --dry-run
           else
-            echo "Submitting LIVE forecasts to tournament ${INPUT_TOURNAMENT}."
-            metaculus-quant-bot forecast --tournament "${INPUT_TOURNAMENT}" --max-questions "${INPUT_MAX_QUESTIONS}" --submit
+            IFS=',' read -ra TOURNAMENTS <<< "${INPUT_TOURNAMENT}"
+            for T in "${TOURNAMENTS[@]}"; do
+              T_TRIM="$(echo "${T}" | xargs)"
+              if [ -z "${T_TRIM}" ]; then continue; fi
+              if [ "${GITHUB_EVENT_NAME}" = "pull_request" ] || [ "${INPUT_SUBMIT}" != "true" ]; then
+                echo "Running authenticated DRY-RUN on tournament ${T_TRIM} (no forecasts posted)."
+                metaculus-quant-bot forecast --tournament "${T_TRIM}" --max-questions "${INPUT_MAX_QUESTIONS}" --dry-run
+              else
+                echo "Submitting LIVE forecasts to tournament ${T_TRIM}."
+                metaculus-quant-bot forecast --tournament "${T_TRIM}" --max-questions "${INPUT_MAX_QUESTIONS}" --submit
+              fi
+            done
           fi
