@@ -24,6 +24,8 @@ from .models import ForecastResult, MetaculusQuestion, NumericScaling, Submissio
 API_BASE_URL = "https://www.metaculus.com/api"
 FALL_2026_FUTUREEVAL_ID = 33121
 SUMMER_2026_FUTUREEVAL_ID = 33022
+MARKET_PULSE_26Q4_ID = 33131
+MARKET_PULSE_26Q4_SLUG = "market-pulse-26q4"
 MINIBENCH_SLUG = "minibench"
 BOT_TESTING_AREA_SLUG = "bot-testing-area"
 
@@ -193,10 +195,12 @@ def parse_post_to_questions(post: dict[str, Any]) -> list[MetaculusQuestion]:
     """Parse a Metaculus `/api/posts/` record into one or more MetaculusQuestion objects."""
     post_id = int(post["id"])
     raw_questions: list[dict[str, Any]] = []
+    grp_obj: dict[str, Any] = {}
     if isinstance(post.get("question"), dict):
         raw_questions.append(post["question"])
     elif isinstance(post.get("group_of_questions"), dict):
-        sub_qs = post["group_of_questions"].get("questions") or []
+        grp_obj = post["group_of_questions"]
+        sub_qs = grp_obj.get("questions") or []
         for sq in sub_qs:
             if isinstance(sq, dict):
                 raw_questions.append(sq)
@@ -235,9 +239,27 @@ def parse_post_to_questions(post: dict[str, Any]) -> list[MetaculusQuestion]:
         if isinstance(centers, list) and centers and isinstance(centers[0], (int, float)):
             community_pred = float(centers[0])
 
-        q_title = q.get("title") or post.get("title") or f"Question {q.get('id')}"
-        q_desc = q.get("description") or post.get("description") or ""
+        q_title = str(q.get("title") or post.get("title") or f"Question {q.get('id')}")
+        q_label = str(q.get("label") or "").strip()
+        if q_label and q_label.lower() not in q_title.lower():
+            q_title = f"{q_title} ({q_label})"
+
+        q_desc = str(q.get("description") or grp_obj.get("description") or post.get("description") or "")
+        q_crit = str(
+            q.get("resolution_criteria")
+            or grp_obj.get("resolution_criteria")
+            or post.get("resolution_criteria")
+            or ""
+        )
+        q_fine = str(q.get("fine_print") or grp_obj.get("fine_print") or post.get("fine_print") or "")
         q_url = f"https://www.metaculus.com/questions/{post_id}/"
+
+        open_lo = q.get("open_lower_bound")
+        if open_lo is None and isinstance(scaling_raw, dict):
+            open_lo = scaling_raw.get("open_lower_bound", False)
+        open_hi = q.get("open_upper_bound")
+        if open_hi is None and isinstance(scaling_raw, dict):
+            open_hi = scaling_raw.get("open_upper_bound", False)
 
         options_raw = q.get("options") or []
         options = [str(opt) for opt in options_raw if opt is not None]
@@ -246,17 +268,17 @@ def parse_post_to_questions(post: dict[str, Any]) -> list[MetaculusQuestion]:
             MetaculusQuestion(
                 question_id=int(q["id"]),
                 post_id=post_id,
-                title=str(q_title),
-                description=str(q_desc),
-                resolution_criteria=str(q.get("resolution_criteria") or ""),
-                fine_print=str(q.get("fine_print") or ""),
+                title=q_title,
+                description=q_desc,
+                resolution_criteria=q_crit,
+                fine_print=q_fine,
                 question_type=qtype,
                 status=str(q.get("status") or post.get("status") or "open"),
                 url=q_url,
-                scheduled_close_time=q.get("scheduled_close_time"),
-                scheduled_resolve_time=q.get("scheduled_resolve_time"),
-                open_lower_bound=bool(q.get("open_lower_bound", False)),
-                open_upper_bound=bool(q.get("open_upper_bound", False)),
+                scheduled_close_time=q.get("scheduled_close_time") or post.get("scheduled_close_time"),
+                scheduled_resolve_time=q.get("scheduled_resolve_time") or post.get("scheduled_resolve_time"),
+                open_lower_bound=bool(open_lo),
+                open_upper_bound=bool(open_hi),
                 unit=str(q.get("unit") or ""),
                 scaling=scaling,
                 options=options,
@@ -400,12 +422,12 @@ class MetaculusClient:
         offset: int = 0,
         skip_already_forecasted: bool = True,
     ) -> list[MetaculusQuestion]:
-        """Fetch open binary/multiple_choice/numeric/discrete questions from a tournament."""
+        """Fetch open binary/multiple_choice/numeric/discrete/group questions from a tournament."""
         params: dict[str, Any] = {
             "limit": limit,
             "offset": offset,
             "order_by": "-hotness",
-            "forecast_type": "binary,multiple_choice,numeric,discrete",
+            "forecast_type": "binary,multiple_choice,numeric,discrete,group_of_questions",
             "tournaments": [tournament_id],
             "statuses": "open",
             "include_description": "true",
@@ -415,12 +437,26 @@ class MetaculusClient:
         results = payload.get("results") or []
         questions: list[MetaculusQuestion] = []
         for post in results:
-            for q in parse_post_to_questions(post):
-                if q.status != "open":
-                    continue
-                if skip_already_forecasted and q.already_forecasted:
-                    continue
-                questions.append(q)
+            parsed_qs = parse_post_to_questions(post)
+            open_qs = [
+                q
+                for q in parsed_qs
+                if q.status == "open" and (not skip_already_forecasted or not q.already_forecasted)
+            ]
+            # Enrich group_of_questions posts via detail endpoint when list endpoint omits criteria
+            if open_qs and isinstance(post.get("group_of_questions"), dict):
+                if all(not q.resolution_criteria and not q.description for q in open_qs):
+                    try:
+                        detail_qs = self.get_post_questions(int(post["id"]))
+                        open_qs = [
+                            q
+                            for q in detail_qs
+                            if q.status == "open"
+                            and (not skip_already_forecasted or not q.already_forecasted)
+                        ]
+                    except MetaculusAPIError:
+                        pass
+            questions.extend(open_qs)
         return questions
 
     def get_post_questions(self, post_id: int) -> list[MetaculusQuestion]:

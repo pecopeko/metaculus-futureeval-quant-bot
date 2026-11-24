@@ -8,9 +8,9 @@ on:
   workflow_dispatch:
     inputs:
       tournament:
-        description: "Metaculus tournament ID/slug or comma-separated list (default: 33121,minibench)"
+        description: "Metaculus tournament ID/slug or comma-separated list (default: 33121,minibench,market-pulse-26q4)"
         required: false
-        default: "33121,minibench"
+        default: "33121,minibench,market-pulse-26q4"
       submit:
         description: "Actually POST forecasts & private reasoning comments (requires METACULUS_TOKEN)"
         required: false
@@ -76,7 +76,7 @@ jobs:
           EXTREMIZE_D: ${{ vars.EXTREMIZE_D || '1.08' }}
           PROB_MIN: ${{ vars.PROB_MIN || '0.01' }}
           PROB_MAX: ${{ vars.PROB_MAX || '0.99' }}
-          INPUT_TOURNAMENT: ${{ github.event.inputs.tournament || vars.METACULUS_TOURNAMENT || '33121,minibench' }}
+          INPUT_TOURNAMENT: ${{ github.event.inputs.tournament || vars.METACULUS_TOURNAMENT || '33121,minibench,market-pulse-26q4' }}
           INPUT_SUBMIT: ${{ github.event.inputs.submit || vars.SUBMIT_FORECASTS || 'false' }}
           INPUT_MAX_QUESTIONS: ${{ github.event.inputs.max_questions || '20' }}
         run: |

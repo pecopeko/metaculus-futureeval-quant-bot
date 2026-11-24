@@ -54,7 +54,10 @@ FRED_SERIES_TRIGGERS: list[tuple[set[str], str, str]] = [
     ({"fed", "federal reserve", "interest rate", "fomc", "fed funds", "rate cut", "rate hike"}, "FEDFUNDS", "Federal Funds Effective Rate (%)"),
     ({"inflation", "cpi", "consumer price"}, "CPIAUCSL", "US CPI All Urban Consumers (Index)"),
     ({"unemployment", "jobs report", "payroll", "labor market"}, "UNRATE", "US Unemployment Rate (%)"),
-    ({"treasury", "10-year", "bond yield", "yield curve"}, "DGS10", "10-Year Treasury Yield (%)"),
+    ({"treasury", "10-year", "10y", "ust 10y", "bond yield", "yield curve"}, "DGS10", "10-Year Treasury Yield (%)"),
+    ({"vix", "volatility index", "intraday value of the vix"}, "VIXCLS", "CBOE Volatility Index (VIX)"),
+    ({"high yield", "option-adjusted spread", "bofa"}, "BAMLH0A0HYM2", "ICE BofA US High Yield OAS (%)"),
+    ({"crude oil", "wti", "oil futures"}, "DCOILWTICO", "Crude Oil Prices: WTI ($/bbl)"),
     ({"gdp", "recession", "economic growth"}, "GDP", "US Nominal GDP (Billions USD)"),
     ({"s&p 500", "sp500", "s&p500", "stock market"}, "SP500", "S&P 500 Index"),
 ]
@@ -156,6 +159,72 @@ class EvidenceRetriever:
             return items, f"ok ({len(items)} items)"
         except Exception as exc:
             return [], f"error:{type(exc).__name__}"
+
+    def fetch_google_news_rss(self, query: str, limit: int = 6) -> tuple[list[EvidenceItem], str]:
+        """Fetch live global news headlines via public Google News RSS (zero API key)."""
+        clean_q = " ".join(re.findall(r"[A-Za-z0-9'-]+", query)[:7]).strip()
+        if not clean_q:
+            return [], "skipped:empty_query"
+
+        seen_titles: set[str] = set()
+        items: list[EvidenceItem] = []
+        statuses: list[str] = []
+        for q_variant, base_rel in ((clean_q, 0.93), (f"{clean_q} when:90d", 0.91)):
+            try:
+                resp = self._polite_get(
+                    "https://news.google.com/rss/search",
+                    params={
+                        "q": q_variant,
+                        "hl": "en-US",
+                        "gl": "US",
+                        "ceid": "US:en",
+                    },
+                )
+                if resp.status_code != 200:
+                    statuses.append(f"http_{resp.status_code}")
+                    continue
+                xml_txt = resp.text or ""
+                if "<!DOCTYPE" in xml_txt.upper() or "<!ENTITY" in xml_txt.upper():
+                    statuses.append("rejected_unsafe_xml")
+                    continue
+                root = ET.fromstring(xml_txt)
+                rss_items = root.findall("./channel/item")
+                statuses.append("ok")
+                for idx, entry in enumerate(rss_items[:limit]):
+                    title = " ".join((entry.findtext("title") or "").split()).strip()
+                    if not title or title.lower() in seen_titles:
+                        continue
+                    seen_titles.add(title.lower())
+                    link = (entry.findtext("link") or "").strip()
+                    pub_date = (entry.findtext("pubDate") or "").strip() or None
+                    source_el = entry.find("source")
+                    publisher = (source_el.text or "").strip() if source_el is not None else "Google News"
+                    desc = _clean_html(entry.findtext("description") or "")
+                    snippet = f"Publisher: {publisher}"
+                    if pub_date:
+                        snippet += f" ({pub_date})"
+                    if desc and desc.lower() != title.lower():
+                        snippet += f" — {desc[:200]}"
+                    items.append(
+                        EvidenceItem(
+                            source="google_news",
+                            title=title[:220],
+                            snippet=snippet[:340],
+                            url=link,
+                            published_at=pub_date,
+                            relevance_score=round(max(0.55, base_rel - 0.04 * idx), 2),
+                        )
+                    )
+                    if len(items) >= limit:
+                        break
+            except Exception as exc:
+                statuses.append(f"error:{type(exc).__name__}")
+            if len(items) >= limit:
+                break
+
+        if items:
+            return items[:limit], f"ok ({len(items)} items)"
+        return [], ",".join(statuses) or "empty"
 
     def fetch_gdelt(self, query: str, limit: int = 4) -> tuple[list[EvidenceItem], str]:
         """Fetch recent global news articles via GDELT 2.0 Doc API."""
@@ -382,10 +451,15 @@ class EvidenceRetriever:
         source_status: dict[str, str] = {}
         macro_series: dict[str, dict[str, Any]] = {}
 
-        # Always collect Wikipedia & GDELT
+        # Always collect Wikipedia, Google News RSS, & GDELT
         wiki_items, wiki_status = self.fetch_wikipedia(primary_query)
         items.extend(wiki_items)
         source_status["wikipedia"] = wiki_status
+
+        gn_query = " ".join(queries[-1:]) if len(queries) > 1 else question.title[:90]
+        gn_items, gn_status = self.fetch_google_news_rss(gn_query)
+        items.extend(gn_items)
+        source_status["google_news"] = gn_status
 
         gdelt_items, gdelt_status = self.fetch_gdelt(primary_query)
         items.extend(gdelt_items)

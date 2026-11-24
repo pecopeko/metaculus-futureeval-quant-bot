@@ -20,6 +20,7 @@ import httpx
 from .models import MarketAnchorMatch, MetaculusQuestion
 
 POLYMARKET_GAMMA_BASE = "https://gamma-api.polymarket.com"
+KALSHI_API_BASE = "https://api.elections.kalshi.com/trade-api/v2"
 MANIFOLD_API_BASE = "https://api.manifold.markets/v0"
 USER_AGENT = (
     "MetaculusFutureEvalQuantBot/1.0 "
@@ -388,7 +389,7 @@ def score_candidate_match(
     """Score and gate a candidate prediction market contract against a Metaculus question."""
     if not (0.001 <= raw_probability <= 0.999):
         return None
-    if platform == "polymarket" and liquidity_usd < min_liquidity_usd and volume_usd < min_liquidity_usd * 3:
+    if platform in ("polymarket", "kalshi") and liquidity_usd < min_liquidity_usd and volume_usd < min_liquidity_usd * 3:
         return None
     if platform == "manifold" and liquidity_usd < min(50.0, min_liquidity_usd) and volume_usd < 100.0:
         return None
@@ -467,6 +468,10 @@ def score_candidate_match(
         liq_score = min(1.0, math.log1p(max(0.0, liquidity_usd)) / math.log1p(100_000.0))
         vol_score = min(1.0, math.log1p(max(0.0, volume_usd)) / math.log1p(250_000.0))
         platform_mult = 1.0
+    elif platform == "kalshi":
+        liq_score = min(1.0, math.log1p(max(0.0, liquidity_usd)) / math.log1p(80_000.0))
+        vol_score = min(1.0, math.log1p(max(0.0, volume_usd)) / math.log1p(200_000.0))
+        platform_mult = 0.95
     else:
         liq_score = min(1.0, math.log1p(max(0.0, liquidity_usd)) / math.log1p(20_000.0))
         vol_score = min(1.0, math.log1p(max(0.0, volume_usd)) / math.log1p(50_000.0))
@@ -497,7 +502,7 @@ def score_candidate_match(
 
 
 class MarketAnchorMatcher:
-    """Queries live Polymarket Gamma & Manifold Markets public APIs without any API key."""
+    """Queries live Polymarket Gamma, Kalshi, & Manifold Markets public APIs without any API key."""
 
     def __init__(
         self,
@@ -506,6 +511,7 @@ class MarketAnchorMatcher:
     ) -> None:
         self.timeout = timeout
         self._external_client = http_client
+        self._kalshi_cache: Optional[tuple[list[dict[str, Any]], str]] = None
 
     def _get_json(self, url: str, params: dict[str, Any]) -> Any:
         headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
@@ -616,6 +622,65 @@ class MarketAnchorMatcher:
             )
         return candidates, f"ok ({len(candidates)} open binary markets)"
 
+    def search_kalshi(self, query: str, limit: int = 10) -> tuple[list[dict[str, Any]], str]:
+        """Search open regulated binary CFTC contracts on Kalshi public v2 API."""
+        if self._kalshi_cache is None:
+            try:
+                data = self._get_json(
+                    f"{KALSHI_API_BASE}/events",
+                    {"status": "open", "with_nested_markets": "true", "limit": 150},
+                )
+                events = data.get("events") if isinstance(data, dict) else []
+                parsed_all: list[dict[str, Any]] = []
+                for ev in events or []:
+                    if not isinstance(ev, dict):
+                        continue
+                    series_slug = str(ev.get("series_ticker") or ev.get("event_ticker") or "").lower()
+                    ev_title = str(ev.get("title") or "")
+                    for mk in ev.get("markets") or []:
+                        if not isinstance(mk, dict):
+                            continue
+                        if mk.get("market_type") != "binary" or mk.get("status") not in ("active", "open"):
+                            continue
+                        bid = _safe_float(mk.get("yes_bid_dollars"), -1.0)
+                        ask = _safe_float(mk.get("yes_ask_dollars"), -1.0)
+                        last_p = _safe_float(mk.get("last_price_dollars"), -1.0)
+                        if 0.0 <= bid <= 1.0 and 0.0 <= ask <= 1.0 and ask >= bid and (bid + ask) > 0:
+                            prob = 0.5 * (bid + ask)
+                        else:
+                            prob = last_p
+                        if not (0.002 <= prob <= 0.998):
+                            continue
+                        liq = _safe_float(mk.get("liquidity_dollars") or mk.get("open_interest_fp"))
+                        vol = _safe_float(mk.get("volume_fp") or mk.get("volume"))
+                        q_text = str(mk.get("title") or ev_title)
+                        parsed_all.append(
+                            {
+                                "platform": "kalshi",
+                                "market_id": str(mk.get("ticker") or ""),
+                                "question": q_text,
+                                "url": f"https://kalshi.com/markets/{series_slug}",
+                                "raw_probability": prob,
+                                "liquidity_usd": liq,
+                                "volume_usd": vol,
+                                "close_date": mk.get("expected_expiration_time") or mk.get("close_time"),
+                            }
+                        )
+                self._kalshi_cache = (parsed_all, f"ok ({len(parsed_all)} active binary markets)")
+            except Exception as exc:
+                self._kalshi_cache = ([], f"error:{type(exc).__name__}")
+
+        all_markets, stat = self._kalshi_cache
+        if not all_markets:
+            return [], stat
+        q_toks = extract_content_tokens(query)
+        if not q_toks:
+            return all_markets[:limit], stat
+        matched = [
+            c for c in all_markets if q_toks & extract_content_tokens(c["question"])
+        ]
+        return matched[:limit], stat
+
     def find_anchors(
         self,
         question: MetaculusQuestion,
@@ -623,7 +688,7 @@ class MarketAnchorMatcher:
         min_similarity: float = 0.40,
         min_date_alignment: float = 0.50,
     ) -> tuple[list[MarketAnchorMatch], dict[str, str]]:
-        """Query Polymarket + Manifold and return quality-ranked verified matches."""
+        """Query Polymarket + Kalshi + Manifold and return quality-ranked verified matches."""
         queries = build_search_queries(question.title)
         seen_ids: set[tuple[str, str]] = set()
         matches: list[MarketAnchorMatch] = []
@@ -631,11 +696,13 @@ class MarketAnchorMatcher:
 
         for idx, query in enumerate(queries):
             pm_cands, pm_stat = self.search_polymarket(query)
+            kl_cands, kl_stat = self.search_kalshi(query)
             mf_cands, mf_stat = self.search_manifold(query)
             status[f"polymarket_q{idx + 1}"] = pm_stat
+            status[f"kalshi_q{idx + 1}"] = kl_stat
             status[f"manifold_q{idx + 1}"] = mf_stat
 
-            for cand in pm_cands + mf_cands:
+            for cand in pm_cands + kl_cands + mf_cands:
                 key = (cand["platform"], cand["market_id"])
                 if key in seen_ids:
                     continue

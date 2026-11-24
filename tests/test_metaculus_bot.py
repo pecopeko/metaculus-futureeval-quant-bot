@@ -380,3 +380,148 @@ def test_cli_offline_sample_dry_run() -> None:
         assert row["dry_run"] is True
         assert row["submitted"] is False
         assert row["validation_errors"] == []
+
+
+def test_openrouter_free_fallback_and_reasoning_extraction(monkeypatch: pytest.MonkeyPatch) -> None:
+    from metaculus_quant_bot.forecaster import OPENROUTER_FREE_ENSEMBLE, PluggableLLMRouter
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test-key")
+    monkeypatch.delenv("FORECAST_MODEL", raising=False)
+
+    calls: list[str] = []
+
+    def _mock_or(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content.decode("utf-8"))
+        model = payload["model"]
+        calls.append(model)
+        assert payload["max_tokens"] >= 1800
+        if len(calls) == 1:
+            return httpx.Response(429, json={"error": {"message": "rate limited", "code": 429}})
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": None,
+                            "reasoning": '{"probability": 0.31, "rationale": "Recovered from reasoning field"}',
+                        }
+                    }
+                ]
+            },
+        )
+
+    router = PluggableLLMRouter(http_client=httpx.Client(transport=httpx.MockTransport(_mock_or)))
+    text, used_model = router.complete_with_model("sys", "user")
+    assert used_model == OPENROUTER_FREE_ENSEMBLE[1]
+    assert calls == [OPENROUTER_FREE_ENSEMBLE[0], OPENROUTER_FREE_ENSEMBLE[1]]
+    assert '"probability": 0.31' in text
+
+
+def test_google_news_rss_and_kalshi_and_group_questions() -> None:
+    from metaculus_quant_bot.evidence_retriever import EvidenceRetriever
+    from metaculus_quant_bot.market_anchor import MarketAnchorMatcher
+
+    rss_xml = """<?xml version="1.0" encoding="UTF-8"?>
+    <rss version="2.0"><channel>
+      <item>
+        <title>Senegal lawmakers elect new speaker - Reuters</title>
+        <link>https://example.com/news1</link>
+        <pubDate>Tue, 26 May 2026 07:00:00 GMT</pubDate>
+        <source>Reuters</source>
+        <description>Parliamentary update</description>
+      </item>
+    </channel></rss>"""
+
+    def _mock_rss(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=rss_xml)
+
+    ev = EvidenceRetriever(
+        min_request_interval_s=0.0,
+        http_client=httpx.Client(transport=httpx.MockTransport(_mock_rss)),
+    )
+    items, status = ev.fetch_google_news_rss("Senegal National Assembly")
+    assert status.startswith("ok")
+    assert len(items) == 1
+    assert items[0].source == "google_news"
+    assert "Senegal lawmakers" in items[0].title
+
+    # Reject unsafe DOCTYPE/ENTITY XML
+    unsafe_ev = EvidenceRetriever(
+        min_request_interval_s=0.0,
+        http_client=httpx.Client(
+            transport=httpx.MockTransport(lambda req: httpx.Response(200, text="<!DOCTYPE foo><rss/>"))
+        ),
+    )
+    bad_items, bad_status = unsafe_ev.fetch_google_news_rss("Senegal")
+    assert bad_items == []
+    assert "rejected_unsafe_xml" in bad_status
+
+    # Kalshi binary contract parsing & matching
+    kalshi_payload = {
+        "events": [
+            {
+                "series_ticker": "KXFEDDEC26",
+                "title": "Fed December 2026 rate decision",
+                "markets": [
+                    {
+                        "ticker": "KXFEDDEC26-CUT25",
+                        "market_type": "binary",
+                        "status": "active",
+                        "title": "Will the Fed decrease interest rates by 25 bps at the December 2026 meeting?",
+                        "yes_bid_dollars": "0.2200",
+                        "yes_ask_dollars": "0.2600",
+                        "open_interest_fp": "45000.00",
+                        "volume_fp": "120000.00",
+                        "expected_expiration_time": "2026-12-18T19:00:00Z",
+                    }
+                ],
+            }
+        ]
+    }
+    matcher = MarketAnchorMatcher(
+        http_client=httpx.Client(
+            transport=httpx.MockTransport(lambda req: httpx.Response(200, json=kalshi_payload))
+        )
+    )
+    cands, k_stat = matcher.search_kalshi("fed decrease interest rate")
+    assert k_stat.startswith("ok")
+    assert len(cands) == 1
+    assert math.isclose(cands[0]["raw_probability"], 0.24, abs_tol=1e-6)
+
+    # Group of questions unpacking
+    grp_post = {
+        "id": 46015,
+        "title": "What will be the maximum intraday value of the VIX?",
+        "status": "open",
+        "group_of_questions": {
+            "description": "Group description text",
+            "resolution_criteria": "Group criteria text",
+            "questions": [
+                {
+                    "id": 46246,
+                    "title": "What will be the maximum intraday value of the VIX?",
+                    "label": "Dec 7 - Dec 18",
+                    "type": "numeric",
+                    "status": "open",
+                    "open_lower_bound": None,
+                    "open_upper_bound": None,
+                    "scaling": {
+                        "range_min": 10.0,
+                        "range_max": 50.0,
+                        "open_lower_bound": True,
+                        "open_upper_bound": True,
+                        "inbound_outcome_count": 200,
+                    },
+                    "my_forecasts": {"latest": None},
+                }
+            ],
+        },
+    }
+    g_qs = parse_post_to_questions(grp_post)
+    assert len(g_qs) == 1
+    assert "Dec 7 - Dec 18" in g_qs[0].title
+    assert g_qs[0].open_lower_bound is True
+    assert g_qs[0].open_upper_bound is True
+    assert g_qs[0].description == "Group description text"
+    assert g_qs[0].resolution_criteria == "Group criteria text"

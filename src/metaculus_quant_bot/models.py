@@ -44,7 +44,7 @@ class MetaculusQuestion(BaseModel):
 class MarketAnchorMatch(BaseModel):
     """Verified prediction-market contract matched against a Metaculus question."""
 
-    platform: Literal["polymarket", "manifold"]
+    platform: Literal["polymarket", "kalshi", "manifold"]
     market_id: str
     question: str
     url: str

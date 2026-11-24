@@ -45,6 +45,16 @@ DEFAULT_PROB_MIN = 0.01
 DEFAULT_PROB_MAX = 0.99
 DEFAULT_EXTREMIZE_D = 1.08
 
+OPENROUTER_FREE_ENSEMBLE: list[str] = [
+    "nvidia/nemotron-3-ultra-550b-a55b:free",
+    "dots-studio/dots-3-note-preview:free",
+    "nvidia/nemotron-3.5-lightning:free",
+    "nvidia/nemotron-3.5-super-vl:free",
+    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+    "recursive/flint-v1.0:free",
+    "particle-ai/particle-1:free",
+]
+
 PERSONA_SPECS: list[tuple[str, str]] = [
     (
         "Outside-View Base-Rate Quant",
@@ -600,7 +610,7 @@ class PluggableLLMRouter:
                 "openrouter",
                 key,
                 "https://openrouter.ai/api/v1/chat/completions",
-                override_model or "anthropic/claude-sonnet-4.5",
+                override_model or OPENROUTER_FREE_ENSEMBLE[0],
             )
         if key := _real("OPENAI_API_KEY"):
             return (
@@ -637,95 +647,145 @@ class PluggableLLMRouter:
     def is_available(self) -> bool:
         return self.provider != "none"
 
-    def complete(self, system_prompt: str, user_prompt: str, temperature: float = 0.25) -> str:
-        """Send a single chat completion with exponential backoff on 429/5xx."""
+    def _candidate_models_for_call(self, preferred_model: Optional[str] = None) -> list[str]:
+        """Build ordered model fallback chain (enables zero-cost OpenRouter :free resilience)."""
+        primary = (preferred_model or self.model).strip()
+        if self.provider != "openrouter":
+            return [primary]
+        # If caller/user explicitly pinned a paid non-:free OpenRouter model, keep primary first then :free safety net
+        chain: list[str] = []
+        if primary and primary != "openrouter-free-ensemble":
+            chain.append(primary)
+        for m in OPENROUTER_FREE_ENSEMBLE:
+            if m not in chain:
+                chain.append(m)
+        return chain
+
+    def complete_with_model(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        temperature: float = 0.25,
+        preferred_model: Optional[str] = None,
+    ) -> tuple[str, str]:
+        """Send a chat completion and return `(response_text, actual_model_used)`."""
         if not self.is_available:
             raise RuntimeError("No LLM provider configured")
 
-        if self.provider in ("openrouter", "openai", "ollama"):
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            }
-            if self.provider == "openrouter":
-                headers["HTTP-Referer"] = "https://github.com/pecopeko/metaculus-futureeval-quant-bot"
-                headers["X-Title"] = "Metaculus FutureEval Quant Bot"
-            body: dict[str, Any] = {
-                "model": self.model,
-                "temperature": temperature,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-            }
-            url = self.base_url
-            params = None
-        elif self.provider == "anthropic":
-            headers = {
-                "x-api-key": self.api_key,
-                "anthropic-version": "2023-06-01",
-                "Content-Type": "application/json",
-            }
-            body = {
-                "model": self.model,
-                "max_tokens": 1200,
-                "temperature": temperature,
-                "system": system_prompt,
-                "messages": [{"role": "user", "content": user_prompt}],
-            }
-            url = self.base_url
-            params = None
-        elif self.provider == "gemini":
-            headers = {"Content-Type": "application/json"}
-            body = {
-                "systemInstruction": {"parts": [{"text": system_prompt}]},
-                "contents": [{"parts": [{"text": user_prompt}]}],
-                "generationConfig": {"temperature": temperature},
-            }
-            url = self.base_url
-            params = {"key": self.api_key}
-        else:
-            raise RuntimeError(f"Unsupported provider: {self.provider}")
-
+        candidates = self._candidate_models_for_call(preferred_model=preferred_model)
         last_err = ""
-        for attempt in range(self.max_retries):
-            try:
-                if self._external_client is not None:
-                    resp = self._external_client.post(
-                        url, params=params, headers=headers, json=body, timeout=self.timeout
-                    )
-                else:
-                    with httpx.Client(timeout=self.timeout) as client:
-                        resp = client.post(url, params=params, headers=headers, json=body)
-            except httpx.HTTPError as exc:
-                last_err = str(exc)
-                if attempt + 1 < self.max_retries:
-                    time.sleep(2.0 * (2**attempt))
-                    continue
-                raise RuntimeError(f"LLM HTTP error ({self.provider}): {last_err}") from exc
 
-            if resp.status_code in (429, 500, 502, 503, 504) and attempt + 1 < self.max_retries:
-                delay = min(20.0, 2.5 * (2**attempt))
-                time.sleep(delay)
-                continue
-
-            if resp.status_code >= 400:
-                raise RuntimeError(
-                    f"LLM API error ({self.provider} HTTP {resp.status_code}): {resp.text[:300]}"
-                )
-
-            data = resp.json()
+        for cand_idx, active_model in enumerate(candidates):
             if self.provider in ("openrouter", "openai", "ollama"):
-                return str(data["choices"][0]["message"]["content"])
-            if self.provider == "anthropic":
-                parts = data.get("content") or []
-                return "".join(str(p.get("text", "")) for p in parts if isinstance(p, dict))
-            if self.provider == "gemini":
-                cands = data.get("candidates") or []
-                parts = ((cands[0].get("content") or {}).get("parts")) if cands else []
-                return "".join(str(p.get("text", "")) for p in parts if isinstance(p, dict))
+                headers = {
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                }
+                if self.provider == "openrouter":
+                    headers["HTTP-Referer"] = "https://github.com/pecopeko/metaculus-futureeval-quant-bot"
+                    headers["X-Title"] = "Metaculus FutureEval Quant Bot"
+                body: dict[str, Any] = {
+                    "model": active_model,
+                    "max_tokens": 2048,
+                    "temperature": temperature,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                }
+                url = self.base_url
+                params = None
+            elif self.provider == "anthropic":
+                headers = {
+                    "x-api-key": self.api_key,
+                    "anthropic-version": "2023-06-01",
+                    "Content-Type": "application/json",
+                }
+                body = {
+                    "model": active_model,
+                    "max_tokens": 1600,
+                    "temperature": temperature,
+                    "system": system_prompt,
+                    "messages": [{"role": "user", "content": user_prompt}],
+                }
+                url = self.base_url
+                params = None
+            elif self.provider == "gemini":
+                headers = {"Content-Type": "application/json"}
+                body = {
+                    "systemInstruction": {"parts": [{"text": system_prompt}]},
+                    "contents": [{"parts": [{"text": user_prompt}]}],
+                    "generationConfig": {"temperature": temperature},
+                }
+                url = self.base_url
+                params = {"key": self.api_key}
+            else:
+                raise RuntimeError(f"Unsupported provider: {self.provider}")
+
+            # When multiple fallback models exist on OpenRouter, hop immediately on 429/404/5xx
+            attempts_for_model = 1 if len(candidates) > 1 else self.max_retries
+            for attempt in range(attempts_for_model):
+                try:
+                    if self._external_client is not None:
+                        resp = self._external_client.post(
+                            url, params=params, headers=headers, json=body, timeout=self.timeout
+                        )
+                    else:
+                        with httpx.Client(timeout=self.timeout) as client:
+                            resp = client.post(url, params=params, headers=headers, json=body)
+                except httpx.HTTPError as exc:
+                    last_err = f"{active_model}: {exc}"
+                    if attempt + 1 < attempts_for_model:
+                        time.sleep(2.0 * (2**attempt))
+                        continue
+                    break
+
+                if resp.status_code in (429, 500, 502, 503, 504):
+                    last_err = f"{active_model} HTTP {resp.status_code}: {resp.text[:180]}"
+                    if attempt + 1 < attempts_for_model:
+                        delay = min(15.0, 2.0 * (2**attempt))
+                        time.sleep(delay)
+                        continue
+                    break
+
+                if resp.status_code >= 400:
+                    last_err = f"{active_model} HTTP {resp.status_code}: {resp.text[:220]}"
+                    if cand_idx + 1 < len(candidates):
+                        break
+                    raise RuntimeError(f"LLM API error ({self.provider} {last_err})")
+
+                data = resp.json()
+                if self.provider in ("openrouter", "openai", "ollama"):
+                    choices = data.get("choices") or []
+                    if not choices:
+                        last_err = f"{active_model}: empty choices"
+                        break
+                    msg_obj = choices[0].get("message") or {}
+                    text_out = str(msg_obj.get("content") or "").strip()
+                    if not text_out and msg_obj.get("reasoning"):
+                        text_out = str(msg_obj.get("reasoning") or "").strip()
+                    if not text_out:
+                        last_err = f"{active_model}: empty content"
+                        break
+                    return text_out, active_model
+                if self.provider == "anthropic":
+                    parts = data.get("content") or []
+                    return "".join(str(p.get("text", "")) for p in parts if isinstance(p, dict)), active_model
+                if self.provider == "gemini":
+                    cands = data.get("candidates") or []
+                    parts = ((cands[0].get("content") or {}).get("parts")) if cands else []
+                    return "".join(str(p.get("text", "")) for p in parts if isinstance(p, dict)), active_model
 
         raise RuntimeError(f"LLM retries exhausted ({self.provider}): {last_err}")
+
+    def complete(self, system_prompt: str, user_prompt: str, temperature: float = 0.25) -> str:
+        """Send a single chat completion with exponential backoff / model fallback."""
+        text, _ = self.complete_with_model(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            temperature=temperature,
+        )
+        return text
 
 
 def _extract_json_block(text: str) -> Optional[dict[str, Any]]:
@@ -866,9 +926,25 @@ class HybridQuantForecaster:
 
         user_prompt = self._build_question_prompt(question, anchors, evidence, base_rate)
         estimates: list[PersonaEstimate] = []
-        for persona_name, sys_prompt in PERSONA_SPECS:
+        use_openrouter_diversity = (
+            self.llm_router.provider == "openrouter"
+            and (
+                self.llm_router.model in OPENROUTER_FREE_ENSEMBLE
+                or self.llm_router.model == "openrouter-free-ensemble"
+            )
+        )
+        for p_idx, (persona_name, sys_prompt) in enumerate(PERSONA_SPECS):
+            preferred_model: Optional[str] = None
+            if use_openrouter_diversity and p_idx < len(OPENROUTER_FREE_ENSEMBLE):
+                preferred_model = OPENROUTER_FREE_ENSEMBLE[p_idx]
+            used_model = preferred_model or self.llm_router.model
             try:
-                raw = self.llm_router.complete(sys_prompt, user_prompt, temperature=0.25)
+                raw, used_model = self.llm_router.complete_with_model(
+                    sys_prompt,
+                    user_prompt,
+                    temperature=0.25,
+                    preferred_model=preferred_model,
+                )
                 parsed = _extract_json_block(raw) or {}
                 rationale = str(parsed.get("rationale") or raw[:400]).strip()
                 if question.question_type == "binary":
@@ -879,7 +955,7 @@ class HybridQuantForecaster:
                         PersonaEstimate(
                             persona=persona_name,
                             provider=self.llm_router.provider,
-                            model=self.llm_router.model,
+                            model=used_model,
                             probability=clip_prob(p_val, self.prob_min, self.prob_max),
                             rationale=rationale,
                         )
@@ -893,7 +969,7 @@ class HybridQuantForecaster:
                         PersonaEstimate(
                             persona=persona_name,
                             provider=self.llm_router.provider,
-                            model=self.llm_router.model,
+                            model=used_model,
                             option_probabilities=opt_map,
                             rationale=rationale,
                         )
@@ -907,7 +983,7 @@ class HybridQuantForecaster:
                         PersonaEstimate(
                             persona=persona_name,
                             provider=self.llm_router.provider,
-                            model=self.llm_router.model,
+                            model=used_model,
                             percentiles=pct_map,
                             rationale=rationale,
                         )
@@ -917,7 +993,7 @@ class HybridQuantForecaster:
                     PersonaEstimate(
                         persona=persona_name,
                         provider=self.llm_router.provider,
-                        model=self.llm_router.model,
+                        model=used_model,
                         error=str(exc),
                         rationale="",
                     )
