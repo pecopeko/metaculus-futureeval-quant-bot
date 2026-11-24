@@ -55,6 +55,7 @@ FRED_SERIES_TRIGGERS: list[tuple[set[str], str, str]] = [
     ({"inflation", "cpi", "consumer price"}, "CPIAUCSL", "US CPI All Urban Consumers (Index)"),
     ({"unemployment", "jobs report", "payroll", "labor market"}, "UNRATE", "US Unemployment Rate (%)"),
     ({"treasury", "10-year", "10y", "ust 10y", "bond yield", "yield curve"}, "DGS10", "10-Year Treasury Yield (%)"),
+    ({"mortgage", "30-year fixed", "fixed-rate mortgage"}, "MORTGAGE30US", "30-Year Fixed Rate Mortgage Average in the US (%)"),
     ({"vix", "volatility index", "intraday value of the vix"}, "VIXCLS", "CBOE Volatility Index (VIX)"),
     ({"high yield", "option-adjusted spread", "bofa"}, "BAMLH0A0HYM2", "ICE BofA US High Yield OAS (%)"),
     ({"crude oil", "wti", "oil futures"}, "DCOILWTICO", "Crude Oil Prices: WTI ($/bbl)"),

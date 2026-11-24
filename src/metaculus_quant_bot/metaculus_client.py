@@ -437,26 +437,21 @@ class MetaculusClient:
         results = payload.get("results") or []
         questions: list[MetaculusQuestion] = []
         for post in results:
-            parsed_qs = parse_post_to_questions(post)
-            open_qs = [
-                q
-                for q in parsed_qs
-                if q.status == "open" and (not skip_already_forecasted or not q.already_forecasted)
-            ]
-            # Enrich group_of_questions posts via detail endpoint when list endpoint omits criteria
-            if open_qs and isinstance(post.get("group_of_questions"), dict):
-                if all(not q.resolution_criteria and not q.description for q in open_qs):
-                    try:
-                        detail_qs = self.get_post_questions(int(post["id"]))
-                        open_qs = [
-                            q
-                            for q in detail_qs
-                            if q.status == "open"
-                            and (not skip_already_forecasted or not q.already_forecasted)
-                        ]
-                    except MetaculusAPIError:
-                        pass
-            questions.extend(open_qs)
+            # Skip non-question notebook announcement posts before hitting detail endpoint
+            if not isinstance(post.get("question"), dict) and not isinstance(
+                post.get("group_of_questions"), dict
+            ):
+                continue
+            try:
+                detail_qs = self.get_post_questions(int(post["id"]))
+            except MetaculusAPIError:
+                detail_qs = parse_post_to_questions(post)
+            for q in detail_qs:
+                if q.status != "open":
+                    continue
+                if skip_already_forecasted and q.already_forecasted:
+                    continue
+                questions.append(q)
         return questions
 
     def get_post_questions(self, post_id: int) -> list[MetaculusQuestion]:
